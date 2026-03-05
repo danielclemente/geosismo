@@ -1,51 +1,43 @@
 import os
+import re
 import requests
-import time
+from datetime import datetime
 from supabase import create_client, Client
 
-# Configurações do Supabase (Lidas das variáveis de ambiente)
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+# Configurações do Supabase
+URL = os.environ.get("SUPABASE_URL")
+KEY = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(URL, KEY)
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    print("❌ Erro: Variáveis de ambiente SUPABASE_URL ou SUPABASE_KEY não configuradas.")
-    exit()
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+BASE = "https://geosismo.piracicabana.com.br"
+session = requests.Session()
 
 def buscar_e_salvar():
-    print(f"[{time.strftime('%H:%M:%S')}] Iniciando rastreio em Santos...")
+    # 1. Pega as linhas
+    r = session.get(BASE + "/", timeout=15, verify=False)
+    batch_dados = []
     
-    # URL da API da Piracicabana (ajustada conforme o projeto Geosismo)
-    api_url = "https://quantotempofalta.piracicabana.com.br/api/consultar-linhas"
-    
-    try:
-        response = requests.get(api_url, timeout=15)
-        linhas = response.json()
+    # 2. Varre cada linha para achar os onibus
+    for m in re.finditer(r'<option value="([a-f0-9]{40})"[^>]*>([^<]+)</option>', r.text):
+        hash_val, nome = m.group(1), m.group(2).strip()
         
-        batch_dados = []
-        for linha in linhas:
-            # Aqui simulamos a extração dos dados de cada veículo
-            # O script percorre as linhas e identifica os prefixos ativos
-            veiculos = linha.get("veiculos", [])
-            for v in veiculos:
-                batch_dados.append({
-                    "linha": linha.get("nome"),
-                    "prefixo": v.get("prefixo"),
-                    "sentido": v.get("sentido"),
-                    "latitude": float(v.get("lat")),
-                    "longitude": float(v.get("lng"))
-                })
+        # Consulta os veículos daquela linha
+        res_linha = session.post(BASE + "/consulta_linha.php", data={"idLinha": hash_val}, timeout=15, verify=False)
         
-        if batch_dados:
-            # Inserção em massa no Supabase (mais eficiente)
-            supabase.table("posicoes_onibus").insert(batch_dados).execute()
-            print(f"✅ {len(batch_dados)} ônibus salvos no banco!")
-        else:
-            print("⚠️ Nenhum ônibus encontrado no momento.")
+        for item in re.finditer(r"\{prefixo:'([^']+)',lat:([\-\d.]+),lng:([\-\d.]+),\s*sentido:(\d+)", res_linha.text):
+            batch_dados.append({
+                "linha": nome,
+                "prefixo": item.group(1),
+                "latitude": float(item.group(2)),
+                "longitude": float(item.group(3)),
+                "sentido": "IDA" if item.group(4) == "1" else "VOLTA",
+                "timestamp": datetime.now().isoformat()
+            })
 
-    except Exception as e:
-        print(f"❌ Falha na coleta: {e}")
+    # 3. Manda para o Supabase (tabela: posicoes_onibus)
+    if batch_dados:
+        supabase.table("posicoes_onibus").insert(batch_dados).execute()
+        print(f"✅ {len(batch_dados)} ônibus de Santos salvos!")
 
 if __name__ == "__main__":
     buscar_e_salvar()
