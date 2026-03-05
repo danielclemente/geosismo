@@ -105,7 +105,7 @@ try:
                         }}
                     }}
                 }}
-                return false;
+                return false;scr
             """)
             
             if not clicked:
