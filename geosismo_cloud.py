@@ -51,7 +51,7 @@ def buscar_e_salvar():
                     "longitude": float(item.group(3)),
                     "sentido": "IDA" if item.group(4) == "1" else "VOLTA",
                     "horario": horario_atual, # <--- SUA NOVA COLUNA AQUI
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
                 })
         except Exception as e:
             print(f"⚠️ Erro ao puxar a linha {nome}: {e}")
